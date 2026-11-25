@@ -18,6 +18,8 @@ from jobcollector.models import Job
 logger = logging.getLogger(__name__)
 
 _LINKEDIN_LINK = "View job:"
+# The heading can sit directly above the first card, with no blank line.
+_LINKEDIN_BREAKS = ("-----", "Your job alert for ")
 _LINKEDIN_PATH = re.compile(r"/(?:comm/)?jobs/view/(?:[^/]*-)?(\d+)/?")
 _INDEED_KEY = re.compile(r"[0-9a-f]{16}")
 _INDEED_JOB_PATHS = ("/rc/clk", "/pagead/clk", "/viewjob")
@@ -54,7 +56,7 @@ def parse_linkedin(text: str) -> list[Job]:
             if job is not None:
                 jobs.append(job)
             section = []
-        elif "https://" in line or line.startswith("-----"):
+        elif "https://" in line or line.startswith(_LINKEDIN_BREAKS):
             section = []
         else:
             section.append(line)
@@ -167,3 +169,4 @@ _PARSERS: dict[str, Callable[[str], list[Job]]] = {
     "jobalerts-noreply@linkedin.com": parse_linkedin,
     "donotreply@jobalert.indeed.com": parse_indeed,
 }
+SENDERS: tuple[str, ...] = tuple(_PARSERS)

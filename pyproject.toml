@@ -2,7 +2,7 @@
 name = "jobcollector"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["pyyaml"]
+dependencies = ["pyyaml", "pydantic>=2"]
 
 [project.optional-dependencies]
 dev = ["pytest"]

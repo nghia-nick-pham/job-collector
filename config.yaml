@@ -5,5 +5,24 @@ keywords:
 exclusions: []      # TODO: titles, companies or terms to drop
 locations:
   - Canada
-rubric: ""          # TODO: how the scorer should weigh a posting
+adzuna:
+  max_days_old: 3
+  max_pages: 1      # 50 results per page, for each keyword and location
+email:
+  max_age_days: 14  # ignore older unread alerts
+rubric: |           # parts add up to 100
+  - Stack match: 40
+  - Seniority fit: 20
+  - Canada eligibility / remote: 20
+  - Domain interest: 10
+  - Compensation: 10
 model: haiku        # passed to claude -p --model
+# Filters match whole words (plural "s" allowed); a missing or empty list filters nothing.
+include_any: [data engineer, software engineer, analytics engineer, python, java, dbt]  # title or description
+exclude_title_any: [director, principal, intern]      # title only: "reports to the director" is fine
+exclude_any: [us citizen, security clearance]         # title or description
+locations_ok: [canada, remote, toronto, ontario]
+scoring:
+  model: haiku
+  batch_size: 10
+  timeout_seconds: 120

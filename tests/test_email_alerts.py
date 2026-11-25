@@ -166,6 +166,15 @@ def test_linkedin_badges_after_blank_line_are_not_the_card() -> None:
     assert rows(parse_linkedin(body)) == [("Dev", "Acme", "Toronto, ON", "123")]
 
 
+def test_linkedin_heading_directly_above_card_is_not_the_title() -> None:
+    body = (
+        "Your job alert for java developer in Canada            \n"
+        "Dev\nAcme\nToronto, ON\n\nThis company is actively hiring\n"
+        "View job: https://www.linkedin.com/comm/jobs/view/123/?trk=x\n"
+    )
+    assert rows(parse_linkedin(body)) == [("Dev", "Acme", "Toronto, ON", "123")]
+
+
 @pytest.mark.parametrize(
     ("sender", "body"),
     [

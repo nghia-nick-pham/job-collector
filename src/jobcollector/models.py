@@ -18,3 +18,5 @@ class Job:
     location: str
     url: str
     external_id: str | None = None
+    description: str = ""
+    job_id: int | None = None  # set by store.py once saved
