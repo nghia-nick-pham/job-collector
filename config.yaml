@@ -1,0 +1,9 @@
+# Committed: no secrets here (those go in .env).
+keywords:
+  - software engineer
+  - data engineer
+exclusions: []      # TODO: titles, companies or terms to drop
+locations:
+  - Canada
+rubric: ""          # TODO: how the scorer should weigh a posting
+model: haiku        # passed to claude -p --model

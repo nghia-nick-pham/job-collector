@@ -1,0 +1,21 @@
+name: nightly
+
+# Manual only until the pipeline is implemented; then add a schedule.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install .
+      # TODO: install and authenticate the Claude Code CLI with the subscription
+      # login (no API key), restore the SQLite file, run
+      # `python -m jobcollector.main`, then save the SQLite file.
