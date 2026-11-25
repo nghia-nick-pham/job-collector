@@ -1,7 +1,4 @@
-"""SQLite dedupe, score cache and emailed state; the only module that contains SQL.
-
-Emailed state is not implemented yet.
-"""
+"""SQLite dedupe, score cache and emailed state; the only module that contains SQL."""
 
 import json
 import sqlite3
@@ -35,6 +32,10 @@ CREATE TABLE IF NOT EXISTS scores (
     red_flags TEXT NOT NULL,
     model TEXT NOT NULL,
     scored_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS emailed (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs (id),
+    emailed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -92,6 +93,24 @@ class Store:
             )
             for row in rows
         }
+
+    def unemailed(self) -> list[tuple[Job, JobScore]]:
+        """Return scored jobs not emailed yet."""
+        rows = self._db.execute(
+            "SELECT source, title, company, location, url, external_id, description, id"
+            " FROM jobs WHERE id IN (SELECT job_id FROM scores)"
+            " AND id NOT IN (SELECT job_id FROM emailed) ORDER BY id DESC"
+        )
+        scores = self.scores()
+        return [(job, scores[job.job_id]) for job in (Job(*row) for row in rows) if job.job_id]
+
+    def mark_emailed(self, job_ids: Iterable[int]) -> None:
+        """Record the jobs as emailed. Call only after the send succeeds."""
+        with self._db:
+            self._db.executemany(
+                "INSERT OR IGNORE INTO emailed (job_id) VALUES (?)",
+                [(job_id,) for job_id in job_ids],
+            )
 
     def _add(self, job: Job) -> bool:
         fingerprint = _fingerprint(job)

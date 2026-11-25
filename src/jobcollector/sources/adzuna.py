@@ -31,9 +31,10 @@ def collect(
     locations: Sequence[str],
     max_days_old: int,
     max_pages: int,
-) -> list[Job]:
-    """Search each keyword in each location; one failed query skips only itself.
+) -> tuple[list[Job], int]:
+    """Return the postings and how many queries failed.
 
+    Searches each keyword in each location; a failed query skips only itself.
     Overlapping results are returned as is; store.py dedupes.
     """
     jobs: list[Job] = []
@@ -63,7 +64,7 @@ def collect(
             logger.error("Adzuna query %r failed: %s %s", keyword, type(error).__name__, status)
     if queries and failures == len(queries):
         raise AdzunaError("all Adzuna queries failed")
-    return jobs
+    return jobs, failures
 
 
 def _fetch_page(page: int, params: dict[str, str]) -> list[dict[str, Any]]:

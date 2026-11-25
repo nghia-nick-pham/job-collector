@@ -7,8 +7,10 @@
 /data/*
 !/data/.gitkeep
 /logs/*
+/digest.html
 !/logs/.gitkeep
 *.db
+!/data/jobs.db
 *.db-*
 *.sqlite
 *.sqlite3

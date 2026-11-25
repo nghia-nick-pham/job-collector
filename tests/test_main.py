@@ -6,6 +6,7 @@ import pytest
 
 from jobcollector import main as app
 from jobcollector.claude_cli import ClaudeReportedError
+from jobcollector.digest import Digest
 from jobcollector.mailbox import RawMessage
 from jobcollector.models import Job
 
@@ -33,9 +34,17 @@ def marked(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     mail = [RawMessage("7", FIXTURE.read_bytes()), RawMessage("8", b"From: x@y.z\n\nhi")]
     monkeypatch.setattr(app.mailbox, "fetch_unread", lambda *a: mail)
     monkeypatch.setattr(app.mailbox, "mark_read", lambda u, p, uids: calls.append(list(uids)))
-    monkeypatch.setattr(app.adzuna, "collect", lambda *a, **k: [ADZUNA_JOB])
+    monkeypatch.setattr(app.adzuna, "collect", lambda *a, **k: ([ADZUNA_JOB], 0))
     monkeypatch.setattr(app.scorer, "run_claude", fake_claude)
+    monkeypatch.setattr(app.digest, "send", lambda message, user, password: None)
     return calls
+
+
+@pytest.fixture
+def sent(marked: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> list[Digest]:
+    messages: list[Digest] = []
+    monkeypatch.setattr(app.digest, "send", lambda message, u, p: messages.append(message))
+    return messages
 
 
 def fake_claude(prompt: str, *args: Any) -> dict[str, Any]:
@@ -107,7 +116,7 @@ def test_mark_read_failure_is_reported(
 
 
 def cached_ids(root: Path) -> list[int]:
-    with app.open_store(root / "data" / "jobs.sqlite3") as store:
+    with app.open_store(root / "data" / "jobs.db") as store:
         return sorted(store.scores())
 
 
@@ -156,3 +165,69 @@ def test_claude_failure_still_saves_jobs_and_retries_next_run(
 def test_bad_limit_is_rejected(root: Path, value: str) -> None:
     with pytest.raises(SystemExit):
         app.main(["--limit", value], root)
+
+
+def test_digest_is_sent_once_per_job(root: Path, sent: list[Digest]) -> None:
+    app.main([], root)
+    app.main([], root)
+    assert [len(message.job_ids) for message in sent] == [10, 0]
+    assert "LinkedIn: 10 postings; 1 unread alerts" in sent[0].html
+    assert "Indeed: 0 postings; 0 unread alerts" in sent[0].html
+    assert "Adzuna: 1 postings" in sent[0].html
+    assert "10 of 10 jobs scored; 0 batches failed." in sent[0].html
+
+
+def test_failed_send_is_retried_next_run(
+    root: Path, sent: list[Digest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(app.digest, "send", boom)
+        assert app.main([], root) == 1
+    assert app.main([], root) == 0
+    assert len(sent[0].job_ids) == 10
+
+
+def test_preview_writes_file_and_leaves_jobs_unemailed(root: Path, sent: list[Digest]) -> None:
+    assert app.main(["--preview"], root) == 0
+    assert sent == []
+    assert "Adzuna: 1 postings" in (root / "digest.html").read_text(encoding="utf-8")
+    app.main([], root)
+    assert len(sent[0].job_ids) == 10
+
+
+def test_dry_run_preview_changes_nothing_else(
+    root: Path, sent: list[Digest], marked: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app.scorer, "run_claude", boom)
+    assert app.main(["--preview", "--dry-run"], root) == 0
+    assert "Scoring did not run." in (root / "digest.html").read_text(encoding="utf-8")
+    assert (sent, marked, (root / "data").exists()) == ([], [], False)
+
+
+def test_dry_run_neither_sends_nor_writes_digest(root: Path, sent: list[Digest]) -> None:
+    app.main(["--dry-run"], root)
+    assert sent == [] and not (root / "digest.html").exists()
+
+
+def test_digest_reports_failures(
+    root: Path, sent: list[Digest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def logged_out(*args: Any) -> Any:
+        raise ClaudeReportedError("Not logged in \u00b7 Please run /login")
+
+    monkeypatch.setattr(app.scorer, "run_claude", logged_out)
+    monkeypatch.setattr(app.adzuna, "collect", boom)
+    assert app.main([], root) == 1
+    assert "Adzuna: 0 postings; OSError: down" in sent[0].html
+    assert "0 of 9 jobs scored; 1 batches failed; 2 batches not attempted; reason: auth." in (
+        sent[0].html
+    )
+
+
+def test_unreadable_alert_is_a_source_problem(
+    root: Path, sent: list[Digest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mail = [RawMessage("9", b"From: donotreply@jobalert.indeed.com\n\nnew layout")]
+    monkeypatch.setattr(app.mailbox, "fetch_unread", lambda *a: mail)
+    assert app.main([], root) == 1
+    assert "Indeed: 0 postings; 1 unread alerts, 1 with no readable postings" in sent[0].html

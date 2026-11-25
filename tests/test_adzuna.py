@@ -18,6 +18,12 @@ RESULT = {
 }
 
 
+class failures:
+    """The failed-query count from the latest run()."""
+
+    value = 0
+
+
 def run(monkeypatch: pytest.MonkeyPatch, reply: Any, **kwargs: Any) -> tuple[list[Job], list[str]]:
     urls: list[str] = []
 
@@ -29,7 +35,8 @@ def run(monkeypatch: pytest.MonkeyPatch, reply: Any, **kwargs: Any) -> tuple[lis
     args: dict[str, Any] = dict(
         keywords=["data engineer"], locations=["Canada"], max_days_old=3, max_pages=1
     )
-    return adzuna.collect("the-id", "the-key", **{**args, **kwargs}), urls
+    jobs, failures.value = adzuna.collect("the-id", "the-key", **{**args, **kwargs})
+    return jobs, urls
 
 
 def fail(url: str) -> Any:
@@ -85,7 +92,7 @@ def test_one_failed_query_keeps_the_others(monkeypatch: pytest.MonkeyPatch) -> N
         return fail(url) if "what_phrase=bad" in url else {"results": [RESULT]}
 
     jobs, _ = run(monkeypatch, reply, keywords=["bad", "good"])
-    assert len(jobs) == 1
+    assert (len(jobs), failures.value) == (1, 1)
 
 
 def test_all_failed_raises_without_leaking_key(

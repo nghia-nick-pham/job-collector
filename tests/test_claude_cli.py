@@ -145,3 +145,33 @@ def test_process_errors(
         call()
     assert isinstance(info.value, claude_cli.ClaudeError)
     assert not Path(fake.kwargs["cwd"]).exists()
+
+
+def exit_error(result: str, status: int | None = None, stderr: str = "") -> Exception:
+    stdout = envelope(is_error=True, result=result, api_error_status=status, usage={"rate": 1})
+    return claude_cli.ClaudeExitError(1, stderr, stdout)
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        # Captured from CLI 2.1.332 without a login.
+        (exit_error("Not logged in \u00b7 Please run /login"), "auth"),
+        (exit_error("x", status=401), "auth"),
+        (exit_error("OAuth token has expired"), "auth"),
+        (exit_error("x", status=429), "usage limit"),
+        (exit_error("Claude AI usage limit reached|1760000000"), "usage limit"),
+        (exit_error("You've hit your limit \u00b7 resets 3pm"), "usage limit"),
+        (exit_error("You've hit your weekly limit"), "usage limit"),
+        (claude_cli.ClaudeReportedError("x", 429), "usage limit"),
+        (claude_cli.ClaudeReportedError("Session limit reached"), "usage limit"),
+        (claude_cli.ClaudeExitError(1, "Please run /login", ""), "auth"),
+        (exit_error("Something else"), "CLI error"),
+        (claude_cli.ClaudeExitError(1, "", "[]"), "CLI error"),
+        (claude_cli.ClaudeTimeoutError("t"), "timeout"),
+        (claude_cli.ClaudeNotFoundError("n"), "claude not found"),
+        (claude_cli.ClaudeOutputError("o", ""), "invalid output"),
+    ],
+)
+def test_failure_reason(error: claude_cli.ClaudeError, expected: str) -> None:
+    assert claude_cli.failure_reason(error) == expected

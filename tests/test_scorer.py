@@ -12,7 +12,7 @@ from jobcollector.claude_cli import (
     ClaudeReportedError,
     ClaudeTimeoutError,
 )
-from jobcollector.models import Job
+from jobcollector.models import Job, ScoringHealth
 from jobcollector.scorer import Batch, JobScore, Settings, build_prompt, score_jobs
 
 SETTINGS = Settings(rubric="stack match 40", model="haiku", batch_size=2, timeout_seconds=9)
@@ -42,6 +42,7 @@ class FakeClaude:
     def __init__(self, *replies: Any) -> None:
         self.replies = list(replies)
         self.calls: list[tuple[str, dict[str, Any], str, int]] = []
+        self.health = ScoringHealth(0)
 
     def __call__(
         self, prompt: str, schema: dict[str, Any], model: str, timeout: int
@@ -60,10 +61,12 @@ def run(
     fake = FakeClaude(*replies)
     monkeypatch.setattr(scorer, "run_claude", fake)
     saved: list[list[int]] = []
-    count = score_jobs(
+    health = score_jobs(
         [job(i) for i in ids], "PROFILE", SETTINGS, lambda r: saved.append([s.job_id for s in r])
     )
-    assert count == sum(map(len, saved))
+    assert health.scored == sum(map(len, saved))
+    assert health.requested == len(ids)
+    fake.health = health
     return saved, fake
 
 
@@ -108,12 +111,14 @@ def test_second_bad_answer_skips_only_that_batch(
         saved, fake = run(monkeypatch, [1, 2, 3], bad, bad, answer(3))
     assert saved == [[3]]
     assert len(fake.calls) == 3
+    assert (fake.health.batches_failed, fake.health.reasons) == (1, ["invalid output"])
     assert [r.levelname for r in caplog.records] == ["WARNING", "ERROR"]
 
 
 def test_timeout_skips_batch_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     saved, fake = run(monkeypatch, [1, 2, 3], ClaudeTimeoutError("slow"), answer(3))
     assert (saved, len(fake.calls)) == ([[3]], 2)
+    assert fake.health.reasons == ["timeout"]
 
 
 @pytest.mark.parametrize("error", [ClaudeExitError(1, "limit", ""), ClaudeReportedError("login")])
@@ -122,6 +127,7 @@ def test_usage_limit_or_login_stops_but_keeps_earlier_batches(
 ) -> None:
     saved, fake = run(monkeypatch, [1, 2, 3, 4, 5], answer(1, 2), error)
     assert (saved, len(fake.calls)) == ([[1, 2]], 2)
+    assert (fake.health.batches_failed, fake.health.batches_not_run) == (1, 1)
 
 
 def test_validation_log_omits_model_text(

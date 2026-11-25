@@ -93,3 +93,16 @@ def test_score_survives_when_a_job_gains_an_id(tmp_path: Path) -> None:
         )
         assert store.add_new([JOB]) == []
         assert store.unscored() == []
+
+
+def test_unemailed_returns_scored_jobs_until_marked(tmp_path: Path) -> None:
+    db = tmp_path / "j.db"
+    add(db, JOB, replace(JOB, external_id="2"))
+    score = JobScore(job_id=1, score=80, stack_match=30, reasons=[], red_flags=[])
+    with open_store(db) as store:
+        store.save_scores([score], "haiku")
+        assert store.unemailed() == [(replace(JOB, job_id=1), score)]
+        store.mark_emailed([1])
+        store.mark_emailed([1])
+    with open_store(db) as store:
+        assert store.unemailed() == []

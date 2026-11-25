@@ -2,7 +2,7 @@
 
 import imaplib
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
@@ -26,7 +26,7 @@ class RawMessage:
 
 
 def fetch_unread(
-    user: str, password: str, senders: Sequence[str], since: date
+    user: str, password: str, senders: Iterable[str], since: date
 ) -> list[RawMessage]:
     """Return unread messages from the senders, leaving them unread."""
     messages: list[RawMessage] = []

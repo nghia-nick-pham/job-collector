@@ -29,7 +29,7 @@ _INDEED_REDIRECT_HOST = "engage.indeed.com"
 def parse_email(raw: bytes) -> list[Job]:
     """Parse a raw message with the parser for its sender."""
     message = email.message_from_bytes(raw, policy=policy.default)
-    sender = parseaddr(str(message["From"] or ""))[1].lower()
+    sender = _sender(message)
     parser = _PARSERS.get(sender)
     if parser is None:
         logger.info("No parser for this sender; message ignored")
@@ -38,6 +38,11 @@ def parse_email(raw: bytes) -> list[Job]:
     if not jobs:
         logger.warning("No postings found in an alert from %s", sender)
     return jobs
+
+
+def sender_of(raw: bytes) -> str:
+    """Return the sender's bare address in lower case."""
+    return _sender(email.message_from_bytes(raw, policy=policy.default))
 
 
 def parse_linkedin(text: str) -> list[Job]:
@@ -160,6 +165,10 @@ def _paragraphs(lines: list[str]) -> list[list[str]]:
     return [group for group in groups if group]
 
 
+def _sender(message: EmailMessage) -> str:
+    return parseaddr(str(message["From"] or ""))[1].lower()
+
+
 def _plain_text(message: EmailMessage) -> str:
     body = message.get_body(preferencelist=("plain",))
     return str(body.get_content()) if body is not None else ""
@@ -169,4 +178,8 @@ _PARSERS: dict[str, Callable[[str], list[Job]]] = {
     "jobalerts-noreply@linkedin.com": parse_linkedin,
     "donotreply@jobalert.indeed.com": parse_indeed,
 }
-SENDERS: tuple[str, ...] = tuple(_PARSERS)
+# Address to display name.
+SENDERS: dict[str, str] = {
+    "jobalerts-noreply@linkedin.com": "LinkedIn",
+    "donotreply@jobalert.indeed.com": "Indeed",
+}

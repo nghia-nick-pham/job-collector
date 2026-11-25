@@ -12,9 +12,10 @@ from jobcollector.claude_cli import (
     ClaudeError,
     ClaudeOutputError,
     ClaudeTimeoutError,
+    failure_reason,
     run_claude,
 )
-from jobcollector.models import Job
+from jobcollector.models import Job, ScoringHealth
 
 logger = logging.getLogger(__name__)
 
@@ -78,26 +79,32 @@ def score_jobs(
     profile: str,
     settings: Settings,
     save: Callable[[list[JobScore]], None],
-) -> int:
-    """Score stored jobs, saving each batch as it completes; return how many.
+) -> ScoringHealth:
+    """Score stored jobs, saving each batch as it completes.
 
     A batch that fails is skipped and stays unscored. Failures that would also
     hit the next batch, such as a usage limit or expired login, end scoring.
     """
-    scored = 0
-    for start in range(0, len(jobs), settings.batch_size):
-        batch = jobs[start : start + settings.batch_size]
+    health = ScoringHealth(requested=len(jobs))
+    size = settings.batch_size
+    batches = [jobs[start : start + size] for start in range(0, len(jobs), size)]
+    for number, batch in enumerate(batches, 1):
         try:
             results = _score_batch(batch, profile, settings)
         except (ClaudeOutputError, ClaudeTimeoutError, ValidationError, BatchMismatchError) as error:
             logger.error("Skipped a batch of %d: %s", len(batch), _describe(error))
+            health.batches_failed += 1
+            health.reasons.append(_reason(error))
             continue
         except ClaudeError as error:
             logger.error("Scoring stopped: %s", _describe(error))
+            health.batches_failed += 1
+            health.reasons.append(_reason(error))
+            health.batches_not_run = len(batches) - number
             break
         save(results)
-        scored += len(results)
-    return scored
+        health.scored += len(results)
+    return health
 
 
 def build_prompt(jobs: Sequence[Job], profile: str, rubric: str) -> str:
@@ -144,6 +151,10 @@ def _check_ids(jobs: Sequence[Job], results: Sequence[JobScore]) -> None:
         raise ValueError("every job to score needs a job_id")
     if received != expected:
         raise BatchMismatchError(f"expected job ids {expected}, got {received}")
+
+
+def _reason(error: Exception) -> str:
+    return failure_reason(error) if isinstance(error, ClaudeError) else "invalid output"
 
 
 def _describe(error: Exception) -> str:

@@ -22,6 +22,11 @@ include_any: [data engineer, software engineer, analytics engineer, python, java
 exclude_title_any: [director, principal, intern]      # title only: "reports to the director" is fine
 exclude_any: [us citizen, security clearance]         # title or description
 locations_ok: [canada, remote, toronto, ontario]
+digest:             # lowest score in each tier; below "maybe" is listed in brief
+  strong: 80
+  good: 60
+  maybe: 40
+  max_jobs: 50      # per email, so Gmail does not cut it off; the rest go in the next one
 scoring:
   model: haiku
   batch_size: 10
