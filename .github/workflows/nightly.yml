@@ -1,21 +1,129 @@
 name: nightly
 
-# Manual only until the pipeline is implemented; then add a schedule.
 on:
+  schedule:
+    - cron: "0 10 * * *" # UTC
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # to commit data/jobs.db
+
+# Two runs at once would both change the database.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash # fails on errors, including inside pipes
 
 jobs:
   collect:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Keep the push token out of .git/config while the pipeline runs.
+          persist-credentials: false
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install .
-      # TODO: install and authenticate the Claude Code CLI with the subscription
-      # login (no API key), restore the SQLite file, run
-      # `python -m jobcollector.main`, then save the SQLite file.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install Python dependencies
+        run: pip install .
+
+      # Secrets are given only to the steps that need them, never to installs.
+      - name: Check secrets
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+        run: |
+          missing=0
+          for name in CLAUDE_CODE_OAUTH_TOKEN GMAIL_USER GMAIL_APP_PASSWORD ADZUNA_APP_ID ADZUNA_APP_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository secret $name is not set."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Smoke-test Claude Code
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          cd "$(mktemp -d)" # so this repo's CLAUDE.md is not loaded
+          status=0
+          # The reply is discarded: it could carry account details into the log.
+          timeout 120 claude -p "reply OK" --model haiku < /dev/null > reply.txt 2>&1 || status=$?
+          if [ "$status" -eq 124 ]; then
+            echo "::error::Claude Code smoke test timed out after 120 seconds."
+            exit 1
+          elif [ "$status" -ne 0 ]; then
+            if grep -qiE 'limit' reply.txt; then
+              cause="looks like a usage limit; wait for it to reset"
+            elif grep -qiE 'log(ged)? ?in|auth|401|403|token|api key' reply.txt; then
+              cause="looks like authentication; run 'claude setup-token' and update CLAUDE_CODE_OAUTH_TOKEN"
+            else
+              cause="cause not recognized; run the same command locally to see it"
+            fi
+            echo "::error::Claude Code smoke test failed with exit code $status: $cause."
+            exit 1
+          elif ! grep -qw 'OK' reply.txt; then
+            echo "::error::Claude Code smoke test exited normally but did not reply OK."
+            exit 1
+          fi
+          echo "Claude Code replied OK."
+
+      - name: Run the pipeline
+        id: pipeline
+        timeout-minutes: 55
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+        run: python -m jobcollector.main
+
+      # Also after a failed run: it may already have marked alerts as read and
+      # sent the digest, and only the database remembers that.
+      - name: Commit the database if it changed
+        if: always() && steps.pipeline.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ ! -f data/jobs.db ]; then
+            echo "No database to commit."
+            exit 0
+          fi
+          # Opening it also rolls back anything a killed run left half-written.
+          python - <<'EOF'
+          import sqlite3, sys
+          result = sqlite3.connect("data/jobs.db").execute("PRAGMA integrity_check").fetchone()[0]
+          if result != "ok":
+              sys.exit("::error::data/jobs.db is damaged; not committing it.")
+          EOF
+          git add data/jobs.db
+          if git diff --cached --quiet; then
+            echo "Database unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -m "Update jobs.db"
+          gh auth setup-git
+          git pull --quiet --rebase origin "$BRANCH"
+          git push --quiet origin "HEAD:refs/heads/$BRANCH"

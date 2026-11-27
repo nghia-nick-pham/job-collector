@@ -42,7 +42,7 @@ Code lives in `src/jobcollector/`:
 | LLM score | `scorer.py`, via `run_claude()` in `claude_cli.py` |
 | email digest | `digest.py` |
 
-`main.py` runs the stages; `models.py` holds the `Job` dataclass they share. `store.py` is the only module containing SQL (dedupe, score cache, emailed state), and `claude_cli.py` is the only one that invokes `claude`. `config.yaml` holds keywords, exclusions, locations, rubric and model; `profile.md` holds the résumé summary and preferences used for scoring. Sample alert emails for tests go in `tests/fixtures/`; remove personal data before committing them. The SQLite file goes in `data/` and logs in `logs/`; both are gitignored.
+`main.py` runs the stages; `models.py` holds the `Job` dataclass they share. `store.py` is the only module containing SQL (dedupe, score cache, emailed state), and `claude_cli.py` is the only one that invokes `claude`. `config.yaml` holds keywords, exclusions, locations, rubric and model; `profile.md` holds the résumé summary and preferences used for scoring. Sample alert emails for tests go in `tests/fixtures/`; remove personal data before committing them. The SQLite file is `data/jobs.db`, which the nightly workflow commits; everything else in `data/` and the logs in `logs/` are gitignored.
 
 Design rules across stages:
 
